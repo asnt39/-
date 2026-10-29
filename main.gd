@@ -22,7 +22,7 @@ var action_feedback := 0.0
 var notice := ""
 var help_open := true
 var camera := Vector2(480, 270)
-const ZOOM := 1.65
+const ZOOM := 2.0
 var fade := 0.0
 var monster := Vector2(800, 410)
 var monster_hp := 3
@@ -32,6 +32,8 @@ var punch_cooldown := 0.0
 var enemy_cooldown := 0.0
 var hurt_time := 0.0
 var monster_hurt := 0.0
+var shake_time := 0.0
+var shake_strength := 0.0
 
 func controls() -> Dictionary:
 	return {"attack": Rect2(755, 315, 80, 80), "action": Rect2(820, 405, 110, 110), "save": Rect2(750, 12, 90, 48), "load": Rect2(850, 12, 98, 48), "help": Rect2(870, 70, 75, 45), "yes": Rect2(335, 385, 135, 48), "no": Rect2(490, 385, 135, 48)}
@@ -96,6 +98,7 @@ func _process(delta: float) -> void:
 	punch_cooldown = maxf(0.0, punch_cooldown - delta)
 	hurt_time = maxf(0.0, hurt_time - delta)
 	monster_hurt = maxf(0.0, monster_hurt - delta)
+	shake_time = maxf(0.0, shake_time - delta)
 	if map_id == "outside" and monster_hp > 0 and dialogue == "" and not help_open:
 		enemy_cooldown = maxf(0.0, enemy_cooldown - delta)
 		var away := player - monster
@@ -104,7 +107,7 @@ func _process(delta: float) -> void:
 			if can_move(next): monster = next
 		if away.length() < 38 and enemy_cooldown <= 0:
 			health -= 1; enemy_cooldown = 1.6; hurt_time = 0.45
-			haptic(35)
+			haptic(35); shake_time = 0.16; shake_strength = 3.0
 			if health <= 0:
 				health = 5; player = Vector2(470, 330); monster = Vector2(800, 410); monster_hp = 3
 				message("체력을 회복하고 돌아왔습니다.")
@@ -139,7 +142,7 @@ func punch() -> void:
 		var offset := monster - player
 		if offset.length() < 78 and (offset.length() < 14 or facing.dot(offset.normalized()) > 0.35):
 			monster_hp -= 1; monster_hurt = 0.25
-			haptic(20)
+			haptic(20); shake_time = 0.12; shake_strength = 2.0
 			if monster_hp <= 0: message("몬스터를 물리쳤습니다.")
 
 func can_move(pos: Vector2) -> bool:
@@ -244,7 +247,12 @@ func person(pos: Vector2, dir: Vector2, phase: float, color: Color) -> void:
 
 func _draw() -> void:
 	var s := Vector2(960, 540)
-	draw_set_transform(s / 2.0 - camera * ZOOM, 0.0, Vector2.ONE * ZOOM)
+	var camera_draw := camera
+	if shake_time > 0.0:
+		var offset := Vector2(sin(shake_time * 100.0), cos(shake_time * 131.0)) * shake_strength * minf(shake_time / 0.08, 1.0)
+		var half := s / (2.0 * ZOOM)
+		camera_draw = (camera + offset).clamp(half, s - half)
+	draw_set_transform(s / 2.0 - camera_draw * ZOOM, 0.0, Vector2.ONE * ZOOM)
 	rect(Rect2(Vector2.ZERO, s), "526b61" if map_id == "outside" else "665e57")
 	for x in range(0, int(s.x), 40): draw_line(Vector2(x, 0), Vector2(x, s.y), Color(1, 1, 1, 0.07))
 	for y in range(0, int(s.y), 40): draw_line(Vector2(0, y), Vector2(s.x, y), Color(1, 1, 1, 0.07))
