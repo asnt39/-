@@ -14,6 +14,7 @@ var inspected := false
 var dialogue := ""
 var choices := false
 var font: Font = preload("res://assets/NotoSansKR.otf")
+var chanyu: Texture2D = preload("res://assets/chanyu.png")
 var stick_touch := -1
 var stick_mouse := false
 var stick_vector := Vector2.ZERO
@@ -314,6 +315,17 @@ func draw_ellipse_shadow(pos: Vector2) -> void:
 
 func rect(r: Rect2, col: String) -> void: draw_rect(r, Color(col))
 func label(pos: Vector2, value: String, size: int = 18, col: Color = Color.WHITE) -> void: draw_string(font, pos, value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+func draw_chanyu(pos: Vector2, dir: Vector2, phase: float, hurt: bool) -> void:
+	draw_ellipse_shadow(pos)
+	var row := 0
+	if absf(dir.x) > absf(dir.y): row = 1 if dir.x < 0 else 2
+	elif dir.y < 0: row = 3
+	var column := 0
+	if phase != 0.0: column = 1 if sin(phase) >= 0 else 2
+	var source := Rect2(column * 181, row * 181, 181, 181)
+	var tint := Color(1.0, 0.65, 0.65) if hurt else Color.WHITE
+	draw_texture_rect_region(chanyu, Rect2(pos + Vector2(-31, -59), Vector2(62, 62)), source, tint)
+
 func person(pos: Vector2, dir: Vector2, phase: float, color: Color) -> void:
 	draw_ellipse_shadow(pos)
 	var p := pos.round() + Vector2(-15, -42)
@@ -411,10 +423,12 @@ func _draw() -> void:
 		else: attack_amount = pow(punch_time / 0.17, 2.0)
 	var pose := player + punch_direction * attack_amount * 4
 	if party[1 - active_member].joined and party[1 - active_member].hp > 0:
-		person(follower, facing, walk if moving else 0.0, Color("aeb9c9"))
+		if active_member == 1: draw_chanyu(follower, facing, walk if moving else 0.0, false)
+		else: person(follower, facing, walk if moving else 0.0, Color("aeb9c9"))
 	if dash_time > 0:
 		draw_circle(player - dash_dir * 20 + Vector2(0, -20), 11, Color(0.75, 0.9, 0.85, 0.25))
-	person(pose, facing, walk if moving and punch_time <= 0 else 0.0, Color("e6a99c") if hurt_time > 0 else (Color("dce5e4") if active_member == 0 else Color("aeb9c9")))
+	if active_member == 0: draw_chanyu(pose, facing, walk if moving and punch_time <= 0 else 0.0, hurt_time > 0)
+	else: person(pose, facing, walk if moving and punch_time <= 0 else 0.0, Color("e6a99c") if hurt_time > 0 else Color("aeb9c9"))
 	if punch_time > 0:
 		var side_arm := Vector2(-punch_direction.y, punch_direction.x)
 		var shoulder := pose + Vector2(0, -22) + side_arm * 7
