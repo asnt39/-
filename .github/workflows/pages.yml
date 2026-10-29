@@ -1,0 +1,42 @@
+name: Deploy Godot web prototype
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Godot and export template
+        run: |
+          wget -q https://github.com/godotengine/godot-builds/releases/download/4.6.3-stable/Godot_v4.6.3-stable_linux.x86_64.zip -O godot.zip
+          unzip -q godot.zip -d /tmp/godot
+          wget -q https://github.com/godotengine/godot-builds/releases/download/4.6.3-stable/Godot_v4.6.3-stable_export_templates.tpz -O templates.zip
+          mkdir -p ~/.local/share/godot/export_templates/4.6.3.stable
+          unzip -p templates.zip templates/web_nothreads_release.zip > ~/.local/share/godot/export_templates/4.6.3.stable/web_nothreads_release.zip
+          rm godot.zip templates.zip
+      - name: Export game
+        run: |
+          mkdir -p web
+          /tmp/godot/Godot_v4.6.3-stable_linux.x86_64 --headless --import
+          /tmp/godot/Godot_v4.6.3-stable_linux.x86_64 --headless --export-release Web web/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
