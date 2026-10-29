@@ -28,6 +28,10 @@ var monster := Vector2(800, 410)
 var monster_hp := 3
 var health := 5
 var punch_time := 0.0
+var punch_direction := Vector2.DOWN
+var punch_hit := false
+var impact_position := Vector2.ZERO
+var impact_time := 0.0
 var punch_cooldown := 0.0
 var enemy_cooldown := 0.0
 var hurt_time := 0.0
@@ -95,6 +99,10 @@ func _process(delta: float) -> void:
 	action_feedback = maxf(0.0, action_feedback - delta)
 	hint_time = maxf(0.0, hint_time - delta)
 	punch_time = maxf(0.0, punch_time - delta)
+	impact_time = maxf(0.0, impact_time - delta)
+	if punch_time > 0 and punch_time <= 0.17 and not punch_hit:
+		punch_hit = true
+		if dialogue == "" and not help_open: resolve_punch()
 	punch_cooldown = maxf(0.0, punch_cooldown - delta)
 	hurt_time = maxf(0.0, hurt_time - delta)
 	monster_hurt = maxf(0.0, monster_hurt - delta)
@@ -116,8 +124,8 @@ func _process(delta: float) -> void:
 	elif d != Vector2.ZERO: d = d.normalized()
 	moving = false
 	if dialogue == "" and not help_open and d != Vector2.ZERO:
-		facing = d.normalized()
-		var step := d * SPEED * minf(delta, 0.05)
+		if punch_time <= 0: facing = d.normalized()
+		var step := d * SPEED * minf(delta, 0.05) * (0.55 if punch_time > 0 else 1.0)
 		var before := player
 		if can_move(player + Vector2(step.x, 0)): player.x += step.x
 		if can_move(player + Vector2(0, step.y)): player.y += step.y
@@ -137,11 +145,14 @@ func haptic(duration_ms: int) -> void:
 
 func punch() -> void:
 	if dialogue != "" or help_open or punch_cooldown > 0: return
-	punch_time = 0.22; punch_cooldown = 0.42
+	punch_time = 0.32; punch_cooldown = 0.42; punch_direction = facing; punch_hit = false
+
+func resolve_punch() -> void:
 	if map_id == "outside" and monster_hp > 0:
 		var offset := monster - player
-		if offset.length() < 78 and (offset.length() < 14 or facing.dot(offset.normalized()) > 0.35):
+		if offset.length() < 66 and (offset.length() < 14 or punch_direction.dot(offset.normalized()) > 0.45):
 			monster_hp -= 1; monster_hurt = 0.25
+			impact_position = monster + Vector2(0, -18); impact_time = 0.22
 			haptic(20); shake_time = 0.12; shake_strength = 2.0
 			if monster_hp <= 0: message("몬스터를 물리쳤습니다.")
 
@@ -172,6 +183,7 @@ func target() -> String:
 	return best
 
 func interact() -> void:
+	punch_time = 0.0
 	match target():
 		"door":
 			if map_id == "outside": map_id = "inside"; player = Vector2(480, 410); facing = Vector2.UP
@@ -221,9 +233,26 @@ func load_game() -> void:
 		if loaded_facing.is_finite() and loaded_facing.length() > 0.1: facing = loaded_facing.normalized()
 	fade = 0.8; message("불러왔습니다.")
 
+func panel(area: Rect2, fill: Color, border: Color) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = fill
+	style.border_color = border
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(9)
+	style.shadow_color = Color(0, 0, 0, 0.25)
+	style.shadow_size = 6
+	style.shadow_offset = Vector2(0, 4)
+	draw_style_box(style, area)
+
+func draw_ellipse_shadow(pos: Vector2) -> void:
+	var points := PackedVector2Array()
+	for i in range(24): points.append(pos + Vector2(cos(i * TAU / 24) * 17, sin(i * TAU / 24) * 5))
+	draw_colored_polygon(points, Color(0.08, 0.15, 0.14, 0.3))
+
 func rect(r: Rect2, col: String) -> void: draw_rect(r, Color(col))
 func label(pos: Vector2, value: String, size: int = 18, col: Color = Color.WHITE) -> void: draw_string(font, pos, value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
 func person(pos: Vector2, dir: Vector2, phase: float, color: Color) -> void:
+	draw_ellipse_shadow(pos)
 	var p := pos.round() + Vector2(-15, -42)
 	var outline := Color("39495a")
 	var swing := int(round(sin(phase))) if phase != 0.0 else 0
@@ -243,7 +272,9 @@ func person(pos: Vector2, dir: Vector2, phase: float, color: Color) -> void:
 	draw_rect(Rect2(p + Vector2(2, 19 + swing * 2), Vector2(5, 13)), outline)
 	draw_rect(Rect2(p + Vector2(23, 19 - swing * 2), Vector2(5, 13)), outline)
 	draw_rect(Rect2(p + Vector2(7, 34), Vector2(7, 10 + swing * 3)), outline)
+	draw_rect(Rect2(p + Vector2(5, 42 + swing * 3), Vector2(9, 3)), Color("24343d"))
 	draw_rect(Rect2(p + Vector2(16, 34), Vector2(7, 10 - swing * 3)), outline)
+	draw_rect(Rect2(p + Vector2(16, 42 - swing * 3), Vector2(9, 3)), Color("24343d"))
 
 func _draw() -> void:
 	var s := Vector2(960, 540)
@@ -253,17 +284,45 @@ func _draw() -> void:
 		var half := s / (2.0 * ZOOM)
 		camera_draw = (camera + offset).clamp(half, s - half)
 	draw_set_transform(s / 2.0 - camera_draw * ZOOM, 0.0, Vector2.ONE * ZOOM)
-	rect(Rect2(Vector2.ZERO, s), "526b61" if map_id == "outside" else "665e57")
-	for x in range(0, int(s.x), 40): draw_line(Vector2(x, 0), Vector2(x, s.y), Color(1, 1, 1, 0.07))
-	for y in range(0, int(s.y), 40): draw_line(Vector2(0, y), Vector2(s.x, y), Color(1, 1, 1, 0.07))
+	rect(Rect2(Vector2.ZERO, s), "415951" if map_id == "outside" else "55514d")
 	if map_id == "outside":
-		rect(Rect2(285, 85, 390, 165), "344858"); rect(Rect2(300, 105, 360, 145), "c7b5a0")
+		# Stone walkway, inset curb, and quiet vegetation.
+		rect(Rect2(0, 275, 960, 125), "687273")
+		rect(Rect2(0, 280, 960, 115), "89918a")
+		rect(Rect2(425, 245, 110, 295), "89918a")
+		for y in range(284, 390, 27):
+			for x in range(0, 960, 48):
+				draw_rect(Rect2(x + (24 if y % 2 == 0 else 0), y, 46, 25), Color("a2a79a"), false, 1)
+		for i in range(32):
+			var q := Vector2(40 + (i * 79) % 880, 425 + (i * 17) % 90)
+			if absf(q.x - 480) < 65: continue
+			draw_line(q, q + Vector2(-3, -6), Color("6a8470"), 2)
+			draw_line(q, q + Vector2(4, -5), Color("617b68"), 2)
+		for x in [210, 750]:
+			draw_circle(Vector2(x, 260), 23, Color("30483f"))
+			draw_circle(Vector2(x - 5, 251), 16, Color("63806a"))
+			draw_circle(Vector2(x + 10, 255), 13, Color("76907a"))
+	else:
+		for y in range(60, 540, 28):
+			for x in range(0, 960, 96):
+				draw_rect(Rect2(x, y, 94, 26), Color("756b60"), false, 1)
+		rect(Rect2(390, 290, 180, 135), "415e5e")
+		draw_rect(Rect2(398, 298, 164, 119), Color("9bafa2"), false, 2)
+	if map_id == "outside":
+		rect(Rect2(298, 100, 390, 160), "30423e"); rect(Rect2(285, 85, 390, 165), "344858"); rect(Rect2(300, 105, 360, 145), "c7b5a0")
 		rect(Rect2(285, 85, 390, 30), "7d6260"); rect(Rect2(445, 175, 70, 75), "4c5360")
 		rect(Rect2(455, 185, 50, 65), "8c7263"); rect(Rect2(320, 135, 65, 45), "96bbc1"); rect(Rect2(575, 135, 65, 45), "96bbc1")
 		rect(Rect2(458, 190, 44, 3), "ad9981"); rect(Rect2(491, 217, 4, 5), "e1cc99")
 		for x in [350, 605]:
 			rect(Rect2(x, 135, 4, 45), "d9d2bd"); rect(Rect2(x - 30, 155, 65, 3), "d9d2bd")
 		rect(Rect2(285, 112, 390, 5), "645758")
+		for x in [304, 647]:
+			rect(Rect2(x, 116, 10, 134), "a39483"); rect(Rect2(x, 116, 3, 134), "e1d2b6")
+		rect(Rect2(438, 165, 84, 10), "6e6158")
+		rect(Rect2(437, 248, 86, 8), "b3b7a4")
+		for x in [417, 539]:
+			rect(Rect2(x, 184, 5, 24), "405251")
+			rect(Rect2(x - 3, 181, 11, 12), "e4d4a1")
 		for x in range(310, 650, 40): rect(Rect2(x, 87, 18, 3), "ad8e83")
 		rect(Rect2(665, 305, 60, 45), "8a725b"); rect(Rect2(670, 310, 50, 12), "c2a581"); rect(Rect2(680, 325, 30, 3), "d8c6a1"); rect(Rect2(690, 336, 8, 4), "d8c6a1")
 		person(Vector2(245, 330), Vector2.DOWN, 0.0, Color("c9bdad"))
@@ -273,34 +332,62 @@ func _draw() -> void:
 		rect(Rect2(440, 470, 80, 28), "927b67"); rect(Rect2(448, 474, 64, 3), "c4ad88")
 	if map_id == "outside" and monster_hp > 0:
 		var m := monster.round()
+		draw_ellipse_shadow(m)
 		draw_circle(m + Vector2(0, -12), 19, Color("e8c49b") if monster_hurt > 0 else Color("374c53"))
 		draw_circle(m + Vector2(0, -14), 15, Color("a7bbb0"))
+		draw_circle(m + Vector2(-5, -21), 5, Color("d7e0c7"))
+		draw_rect(Rect2(m + Vector2(-5, -7), Vector2(10, 2)), Color("506d66"))
 		draw_circle(m + Vector2(-5, -16), 2, Color("273b40")); draw_circle(m + Vector2(5, -16), 2, Color("273b40"))
 		draw_rect(Rect2(m + Vector2(-18, -40), Vector2(36, 4)), Color("344449"))
 		draw_rect(Rect2(m + Vector2(-18, -40), Vector2(12 * monster_hp, 4)), Color("c7d6a8"))
-	person(player, facing, walk if moving else 0.0, Color("e6a99c") if hurt_time > 0 else Color("dce5e4"))
+	var attack_amount := 0.0
 	if punch_time > 0:
-		var fist := player + Vector2(0, -20) + facing * (32 + (0.22 - punch_time) * 65)
-		draw_line(player + Vector2(0, -20), fist, Color("dce5e4"), 6)
-		draw_circle(fist, 7, Color("f0e1c9"))
+		var elapsed := 0.32 - punch_time
+		if elapsed < 0.08: attack_amount = -sin(elapsed / 0.08 * PI / 2) * 0.18
+		elif elapsed < 0.15: attack_amount = lerpf(-0.18, 1.0, (elapsed - 0.08) / 0.07)
+		else: attack_amount = pow(punch_time / 0.17, 2.0)
+	var pose := player + punch_direction * attack_amount * 4
+	person(pose, facing, walk if moving and punch_time <= 0 else 0.0, Color("e6a99c") if hurt_time > 0 else Color("dce5e4"))
+	if punch_time > 0:
+		var side_arm := Vector2(-punch_direction.y, punch_direction.x)
+		var shoulder := pose + Vector2(0, -22) + side_arm * 7
+		var elbow := shoulder + punch_direction * (8 + attack_amount * 11) + side_arm * (5 - attack_amount * 5)
+		var fist := shoulder + punch_direction * (14 + attack_amount * 32)
+		draw_line(shoulder, elbow, Color("3d5059"), 9)
+		draw_line(elbow, fist, Color("dce5e4"), 7)
+		draw_rect(Rect2(fist - Vector2(6, 6), Vector2(13, 12)), Color("344953"))
+		draw_rect(Rect2(fist - Vector2(4, 4), Vector2(10, 8)), Color("f0e1c9"))
+		if attack_amount > 0.7:
+			draw_line(fist - punch_direction * 18 + side_arm * 10, fist + side_arm * 10, Color(0.95, 0.94, 0.8, 0.6), 2)
+	if impact_time > 0:
+		var spread := (0.22 - impact_time) * 60
+		for i in range(6):
+			var ray := Vector2.from_angle(i * TAU / 6)
+			draw_line(impact_position + ray * (4 + spread), impact_position + ray * (10 + spread), Color(1, 0.92, 0.66, impact_time / 0.22), 2)
 	var arrow_center := player + facing * 27.0 + Vector2(0, -17)
 	var side := Vector2(-facing.y, facing.x)
 	draw_colored_polygon(PackedVector2Array([arrow_center + facing * 6, arrow_center - facing * 4 + side * 4, arrow_center - facing * 4 - side * 4]), Color(0.9, 0.94, 0.75, 0.8))
 	draw_set_transform(Vector2.ZERO)
 	if fade > 0: draw_rect(Rect2(Vector2.ZERO, s), Color(0, 0, 0, fade))
 	var c := controls()
-	draw_circle(stick_center(), 80, Color(0.08, 0.13, 0.17, 0.55))
+	panel(Rect2(14, 12, 210, 69), Color("182b30"), Color("47635e"))
+	draw_circle(stick_center() + Vector2(0, 4), 80, Color(0, 0, 0, 0.15))
+	draw_circle(stick_center(), 80, Color(0.08, 0.13, 0.17, 0.68))
+	draw_arc(stick_center(), 56, 0, TAU, 48, Color(0.7, 0.8, 0.75, 0.15), 1)
+	for angle in [0.0, PI / 2, PI, PI * 1.5]:
+		var tick := Vector2.from_angle(angle)
+		draw_line(stick_center() + tick * 67, stick_center() + tick * 73, Color("a3b7ac"), 2)
 	draw_arc(stick_center(), 78, 0, TAU, 48, Color(0.75, 0.85, 0.82, 0.5), 2)
 	draw_circle(stick_center() + stick_vector, 32, Color(0.68, 0.79, 0.76, 0.85 if stick_vector != Vector2.ZERO else 0.6))
 	draw_circle(c.attack.get_center(), 38, Color("aa715f") if punch_time > 0 else Color("754d45"))
 	draw_arc(c.attack.get_center(), 36, 0, TAU, 40, Color("e2c0a0"), 2)
 	label(c.attack.get_center() + Vector2(-19, 6), "공격", 19)
+	if not OS.has_feature("mobile"): label(c.attack.get_center() + Vector2(-4, 24), "F", 11, Color("dac3b3"))
 	draw_circle(c.action.get_center(), 51, Color(0.32, 0.55, 0.53, 0.98) if action_feedback > 0 else Color(0.16, 0.35, 0.36, 0.94))
 	draw_arc(c.action.get_center(), 48, 0, TAU, 48, Color(0.75, 0.87, 0.82, 0.8), 2)
 	label(c.action.get_center() + Vector2(-19, 7), "확인", 19)
 	for key in ["save", "load", "help"]:
-		draw_rect(c[key], Color(0.08, 0.13, 0.17, 0.90))
-		draw_rect(Rect2(c[key].position, Vector2(c[key].size.x, 2)), Color("83aaa4"))
+		panel(c[key], Color("182b30"), Color("54736b"))
 		label(c[key].position + Vector2(10, 30), "저장" if key == "save" else ("불러오기" if key == "load" else "도움말"), 16)
 	for i in range(5):
 		draw_circle(Vector2(28 + i * 18, 55), 6, Color("e7a99d") if i < health else Color("566465"))
@@ -308,19 +395,19 @@ func _draw() -> void:
 	if dialogue == "" and not help_open:
 		label(Vector2(250, 35), "확인: 상호작용" if target() != "" else "대상을 바라보고 가까이 가세요", 16, Color("e6ead9"))
 	if dialogue != "":
-		draw_rect(Rect2(230, 290, 500, 155), Color(0.07, 0.11, 0.15, 0.96))
+		panel(Rect2(230, 290, 500, 155), Color("15272d"), Color("a2b3a0"))
 		draw_rect(Rect2(230, 290, 500, 3), Color("90b2a9"))
 		draw_rect(Rect2(236, 297, 2, 141), Color(0.5, 0.68, 0.63, 0.5))
 		label(Vector2(250, 335), dialogue, 19)
 		if choices:
-			for key in ["yes", "no"]: draw_rect(c[key], Color("426c68"))
+			for key in ["yes", "no"]: panel(c[key], Color("34544f"), Color("6a8d7d"))
 			label(Vector2(380, 416), "네", 18); label(Vector2(525, 416), "아니요", 18)
 		else: label(Vector2(250, 410), "확인 버튼으로 계속", 16, Color("b9c9c5"))
 	if hint_time > 0:
 		draw_rect(Rect2(240, 70, 480, 40), Color(0.08, 0.13, 0.17, 0.95))
 		label(Vector2(255, 97), notice, 17)
 	if help_open:
-		draw_rect(Rect2(180, 120, 600, 255), Color(0.06, 0.1, 0.14, 0.97))
+		panel(Rect2(180, 120, 600, 255), Color("15272d"), Color("93afa0"))
 		label(Vector2(210, 165), "조작 안내", 24)
 		label(Vector2(210, 210), "왼쪽 조이스틱을 움직여 이동하세요.", 19)
 		label(Vector2(210, 245), "대상을 바라본 채 가까이에서 확인을 누르세요.", 19)
