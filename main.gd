@@ -104,6 +104,7 @@ func _process(delta: float) -> void:
 			if can_move(next): monster = next
 		if away.length() < 38 and enemy_cooldown <= 0:
 			health -= 1; enemy_cooldown = 1.6; hurt_time = 0.45
+			haptic(35)
 			if health <= 0:
 				health = 5; player = Vector2(470, 330); monster = Vector2(800, 410); monster_hp = 3
 				message("체력을 회복하고 돌아왔습니다.")
@@ -125,6 +126,12 @@ func _process(delta: float) -> void:
 	camera = camera.lerp(desired, 1.0 - exp(-delta * 7.0))
 	queue_redraw()
 
+func haptic(duration_ms: int) -> void:
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("if (navigator.vibrate) navigator.vibrate(%d);" % duration_ms)
+	elif OS.has_feature("android"):
+		Input.vibrate_handheld(duration_ms)
+
 func punch() -> void:
 	if dialogue != "" or help_open or punch_cooldown > 0: return
 	punch_time = 0.22; punch_cooldown = 0.42
@@ -132,6 +139,7 @@ func punch() -> void:
 		var offset := monster - player
 		if offset.length() < 78 and (offset.length() < 14 or facing.dot(offset.normalized()) > 0.35):
 			monster_hp -= 1; monster_hurt = 0.25
+			haptic(20)
 			if monster_hp <= 0: message("몬스터를 물리쳤습니다.")
 
 func can_move(pos: Vector2) -> bool:
