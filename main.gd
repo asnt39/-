@@ -33,7 +33,15 @@ var monster := Vector2(650, 350)
 var monster_hp := 3
 var health := 5
 # The second member is a prototype fixture, not a story recruitment decision.
-var party := [{"id":"chanyu", "hp":5, "max_hp":5, "gauge":0.0, "joined":true}, {"id":"test", "hp":5, "max_hp":5, "gauge":0.0, "joined":false}]
+var party := [{"id":"chanyu", "hp":5, "max_hp":5, "gauge":0.0, "joined":true}, {"id":"jeongwoo", "hp":5, "max_hp":5, "gauge":0.0, "joined":false}, {"id":"yechan", "hp":5, "max_hp":5, "gauge":0.0, "joined":false}, {"id":"seojin", "hp":5, "max_hp":5, "gauge":0.0, "joined":false}]
+var region_enemies := {"field":3, "forest":3, "mountain":3, "approach":3}
+var special_time := 0.0
+var special_cooldown := 0.0
+var special_direction := Vector2.RIGHT
+var special_origin := Vector2.ZERO
+var projectile_pos := Vector2.ZERO
+var projectile_alive := false
+var special_kind := 0
 var active_member := 0
 var follower := Vector2(440, 350)
 var game_over := false
@@ -54,7 +62,7 @@ var shake_time := 0.0
 var shake_strength := 0.0
 
 func controls() -> Dictionary:
-	return {"dash": Rect2(665, 400, 72, 72), "party1": Rect2(15, 100, 72, 60), "party2": Rect2(95, 100, 72, 60), "attack": Rect2(755, 315, 80, 80), "action": Rect2(820, 405, 110, 110), "save": Rect2(750, 12, 90, 48), "load": Rect2(850, 12, 98, 48), "help": Rect2(870, 70, 75, 45), "yes": Rect2(335, 385, 135, 48), "no": Rect2(490, 385, 135, 48)}
+	return {"special": Rect2(660, 300, 76, 76), "party3": Rect2(175, 100, 72, 60), "party4": Rect2(255, 100, 72, 60), "dash": Rect2(665, 400, 72, 72), "party1": Rect2(15, 100, 72, 60), "party2": Rect2(95, 100, 72, 60), "attack": Rect2(755, 315, 80, 80), "action": Rect2(820, 405, 110, 110), "save": Rect2(750, 12, 90, 48), "load": Rect2(850, 12, 98, 48), "help": Rect2(870, 70, 75, 45), "yes": Rect2(335, 385, 135, 48), "no": Rect2(490, 385, 135, 48)}
 
 func stick_center() -> Vector2: return Vector2(115, 425)
 func update_stick(pos: Vector2) -> void:
@@ -76,6 +84,9 @@ func tap(pos: Vector2) -> void:
 		restart_game(); return
 	if c.party1.has_point(pos): switch_member(0); return
 	if c.party2.has_point(pos): switch_member(1); return
+	if c.party3.has_point(pos): switch_member(2); return
+	if c.party4.has_point(pos): switch_member(3); return
+	if c.special.has_point(pos): special_attack(); return
 	if c.dash.has_point(pos): start_dash(); return
 	if c.attack.has_point(pos): punch(); return
 	if c.help.has_point(pos): help_open = true; return
@@ -117,6 +128,7 @@ func _input(event: InputEvent) -> void:
 		elif dialogue == "" and event.keycode >= KEY_1 and event.keycode <= KEY_4: switch_member(event.keycode - KEY_1)
 		elif event.keycode == KEY_J or event.keycode == KEY_F: punch()
 		elif event.keycode == KEY_SHIFT: start_dash()
+		elif event.keycode == KEY_K: special_attack()
 
 func _process(delta: float) -> void:
 	fade = maxf(0.0, fade - delta * 2.5)
@@ -131,7 +143,15 @@ func _process(delta: float) -> void:
 	hurt_time = maxf(0.0, hurt_time - delta)
 	monster_hurt = maxf(0.0, monster_hurt - delta)
 	shake_time = maxf(0.0, shake_time - delta)
-	if map_id == "field" and monster_hp > 0 and dialogue == "" and not help_open and not game_over:
+	special_time = maxf(0.0, special_time - delta)
+	special_cooldown = maxf(0.0, special_cooldown - delta)
+	if projectile_alive and dialogue == "" and not help_open and not game_over:
+		var previous := projectile_pos
+		projectile_pos += special_direction * 380 * delta
+		if monster_hp > 0 and is_combat_map() and Geometry2D.get_closest_point_to_segment(monster, previous, projectile_pos).distance_to(monster) < 25:
+			projectile_alive = false; damage_enemy(1)
+		if projectile_pos.distance_to(special_origin) > 260 or not Rect2(0, 0, 960, 540).has_point(projectile_pos): projectile_alive = false
+	if is_combat_map() and monster_hp > 0 and dialogue == "" and not help_open and not game_over:
 		enemy_cooldown = maxf(0.0, enemy_cooldown - delta)
 		var away := player - monster
 		if away.length() < 230 and away.length() > 32:
@@ -177,6 +197,7 @@ func switch_member(index: int) -> void:
 	if index < 0 or index >= party.size() or not party[index].joined or party[index].hp <= 0 or dialogue != "" or help_open or game_over: return
 	party[active_member].hp = health
 	active_member = index; health = party[index].hp
+	projectile_alive = false; special_time = 0.0
 	punch_time = 0.0; dash_time = 0.0
 
 func start_dash() -> void:
@@ -200,16 +221,40 @@ func punch() -> void:
 	if dialogue != "" or help_open or punch_cooldown > 0 or dash_time > 0 or game_over: return
 	punch_time = 0.32; punch_cooldown = 0.42; punch_direction = facing; punch_hit = false
 
+func is_combat_map() -> bool:
+	return map_id in ["field", "forest", "mountain", "approach"]
+
+func damage_enemy(amount: int) -> void:
+	if not is_combat_map() or monster_hp <= 0: return
+	monster_hp = maxi(0, monster_hp - amount); region_enemies[map_id] = monster_hp; monster_hurt = 0.25
+	impact_position = monster + Vector2(0, -18); impact_time = 0.22
+	haptic(20); shake_time = 0.12; shake_strength = 2.0
+	if monster_hp <= 0:
+		if map_id == "field" and not story_flags.slime:
+			story_flags.slime = true; start_event("victory")
+		else: message("몬스터를 물리쳤습니다.")
+
 func resolve_punch() -> void:
-	if map_id == "field" and monster_hp > 0:
+	if is_combat_map() and monster_hp > 0:
 		var offset := monster - player
-		if offset.length() < 66 and (offset.length() < 14 or punch_direction.dot(offset.normalized()) > 0.45):
-			monster_hp -= 1; monster_hurt = 0.25
-			impact_position = monster + Vector2(0, -18); impact_time = 0.22
-			haptic(20); shake_time = 0.12; shake_strength = 2.0
-			if monster_hp <= 0:
-				story_flags.slime = true
-				start_event("victory")
+		if offset.length() < 66 and (offset.length() < 14 or punch_direction.dot(offset.normalized()) > 0.45): damage_enemy(1)
+
+func special_attack() -> void:
+	if dialogue != "" or help_open or game_over or special_cooldown > 0: return
+	special_cooldown = 1.0; special_time = 0.3; special_direction = facing; special_origin = player; special_kind = active_member
+	if active_member == 1 or active_member == 2:
+		projectile_pos = player; projectile_alive = true
+	else:
+		var offset := monster - player
+		var forward := offset.dot(facing)
+		var lateral := absf(offset.cross(facing))
+		if is_combat_map() and monster_hp > 0 and forward >= 0 and forward < (95 if active_member == 0 else 260) and lateral < (40 if active_member == 0 else 22): damage_enemy(1)
+
+func change_region(id: String, entry: Vector2, dir: Vector2) -> void:
+	if is_combat_map(): region_enemies[map_id] = monster_hp
+	map_id = id; player = entry; facing = dir; follower = player + Vector2(-30, 20)
+	monster = Vector2(650, 350); monster_hp = region_enemies.get(id, 0); enemy_cooldown = 1.0
+	projectile_alive = false; special_time = 0; fade = 0.8
 
 func can_move(pos: Vector2) -> bool:
 	if pos.x < 30 or pos.x > 930 or pos.y < 65 or pos.y > 500: return false
@@ -229,6 +274,8 @@ func target() -> String:
 		objects = [{"id":"door", "pos":Vector2(480, 470), "radius":22.0}, {"id":"object", "pos":Vector2(665, 295), "radius":24.0}]
 	else:
 		objects = [{"id":"return", "pos":Vector2(40, 350), "radius":20.0}, {"id":"next", "pos":Vector2(920, 350), "radius":20.0}]
+		if map_id in ["forest", "mountain", "approach"]:
+			objects.append({"id":"recruit", "pos":Vector2(400, 330), "radius":14.0})
 	var best := ""
 	var best_score := -999.0
 	for item in objects:
@@ -252,7 +299,7 @@ func interact() -> void:
 			follower = player + Vector2(-30, 20)
 			fade = 0.8
 		"object":
-			inspected = true; dialogue = "테스트 물건을 살펴보았습니다."
+			inspected = true; dialogue = "물건을 살펴보았지만 특별한 것은 없었다."
 		"npc":
 			if not story_flags.rumor: start_event("rumor")
 			else:
@@ -261,14 +308,24 @@ func interact() -> void:
 		"exit":
 			if not story_flags.rumor: message("떠나기 전에 마을 사람과 이야기하자.")
 			else:
-				map_id = "field"; player = Vector2(85, 350); facing = Vector2.RIGHT; fade = 0.8
+				change_region("field", Vector2(85, 350), Vector2.RIGHT)
 				if not story_flags.field: start_event("field")
 		"return":
-			map_id = "outside"; player = Vector2(865, 350); facing = Vector2.LEFT; fade = 0.8
+			var previous := {"field":"outside", "forest":"field", "mountain":"forest", "approach":"mountain"}.get(map_id, "outside") as String
+			change_region(previous, Vector2(865, 350), Vector2.LEFT)
 		"next":
-			if not story_flags.slime: message("슬라임이 앞길을 막고 있다.")
-			elif not story_flags.prologue_done: start_event("end")
-			else: message("다음 이야기는 준비 중입니다.")
+			if map_id == "field":
+				if not story_flags.slime: message("슬라임이 앞길을 막고 있다.")
+				elif not story_flags.prologue_done: start_event("end")
+				else: change_region("forest", Vector2(85, 350), Vector2.RIGHT)
+			elif map_id == "forest" and party[1].joined: change_region("mountain", Vector2(85, 350), Vector2.RIGHT)
+			elif map_id == "mountain" and party[2].joined: change_region("approach", Vector2(85, 350), Vector2.RIGHT)
+			elif map_id == "approach": message("마왕성은 아직 준비 중입니다.")
+			else: message("먼저 이곳의 동료를 만나세요.")
+		"recruit":
+			var index := {"forest":1, "mountain":2, "approach":3}.get(map_id, 0) as int
+			if not party[index].joined: start_event("join%d" % index)
+			else: dialogue = "이미 함께하고 있습니다."
 		_: message("대상 쪽을 바라보고 가까이 다가가세요.")
 
 func start_event(id: String) -> void:
@@ -286,6 +343,9 @@ func advance_dialogue() -> void:
 		"rumor": story_flags.rumor = true
 		"field": story_flags.field = true
 		"end": story_flags.prologue_done = true
+		"join1": party[1].joined = true
+		"join2": party[2].joined = true
+		"join3": party[3].joined = true
 	event_id = ""; dialogue = ""
 
 func objective() -> String:
@@ -293,12 +353,15 @@ func objective() -> String:
 	if not story_flags.field: return StoryData.OBJECTIVES[1]
 	if not story_flags.slime: return StoryData.OBJECTIVES[2]
 	if not story_flags.prologue_done: return StoryData.OBJECTIVES[3]
-	return StoryData.OBJECTIVES[4]
+	if not party[1].joined: return "숲에서 동료를 만나자"
+	if not party[2].joined: return "산길에서 동료를 만나자"
+	if not party[3].joined: return "성 앞에서 동료를 만나자"
+	return "마왕성을 향하자"
 
 func choose(yes: bool) -> void:
 	choices = false
 	met = yes
-	dialogue = "[테스트 인물] 이야기를 나눴습니다." if yes else "[테스트 인물] 다음에 이야기해요."
+	dialogue = "마을 사람: 조심해서 다녀오세요." if yes else "마을 사람: 필요하면 언제든 들르세요."
 
 func save_game() -> void:
 	if dialogue != "" or help_open:
@@ -306,7 +369,7 @@ func save_game() -> void:
 	var file := FileAccess.open("user://prototype_save.json", FileAccess.WRITE)
 	if file == null: message("저장하지 못했습니다."); return
 	party[active_member].hp = health
-	file.store_string(JSON.stringify({"story_flags": story_flags, "slime_hp": monster_hp, "party": party, "active_member": active_member, "version": 1, "map": map_id, "x": player.x, "y": player.y, "met": met, "inspected": inspected, "facing_x": facing.x, "facing_y": facing.y}))
+	file.store_string(JSON.stringify({"story_flags": story_flags, "region_enemies": region_enemies, "slime_hp": region_enemies.field, "party": party, "active_member": active_member, "version": 1, "map": map_id, "x": player.x, "y": player.y, "met": met, "inspected": inspected, "facing_x": facing.x, "facing_y": facing.y}))
 	file.close()
 	message("저장했습니다.")
 
@@ -319,7 +382,7 @@ func load_game() -> void:
 	if parser.parse(FileAccess.get_file_as_string("user://prototype_save.json")) != OK:
 		message("저장 데이터가 손상되어 불러올 수 없습니다."); return
 	var data = parser.data
-	if not data is Dictionary or data.get("version") != 1 or data.get("map") not in ["outside", "inside", "field"] or not (data.get("x") is float or data.get("x") is int) or not (data.get("y") is float or data.get("y") is int) or not data.get("met", false) is bool or not data.get("inspected", false) is bool:
+	if not data is Dictionary or data.get("version") != 1 or data.get("map") not in ["outside", "inside", "field", "forest", "mountain", "approach"] or not (data.get("x") is float or data.get("x") is int) or not (data.get("y") is float or data.get("y") is int) or not data.get("met", false) is bool or not data.get("inspected", false) is bool:
 		message("저장 데이터가 손상되어 불러올 수 없습니다."); return
 	var old_map := map_id
 	map_id = data.map
@@ -335,11 +398,11 @@ func load_game() -> void:
 	for member in party:
 		member.hp = member.max_hp; member.gauge = 0.0; member.joined = member.id == "chanyu"
 	var saved_party = data.get("party", [])
-	if saved_party is Array and saved_party.size() == 2:
-		for i in range(2):
+	if saved_party is Array:
+		for i in range(mini(saved_party.size(), party.size())):
 			var member = saved_party[i]
 			if member is Dictionary and (member.get("hp") is int or member.get("hp") is float) and member.get("joined") is bool and member.get("gauge", 0.0) is float:
-				party[i].hp = clampi(int(member.hp), 0, party[i].max_hp); party[i].joined = member.joined if i == 0 else false; party[i].gauge = clampf(member.get("gauge", 0.0), 0.0, 1.0)
+				party[i].hp = clampi(int(member.hp), 0, party[i].max_hp); party[i].joined = member.joined if (i == 0 or (saved_party.size() == 4 and member.get("id", "") == party[i].id)) else false; party[i].gauge = clampf(member.get("gauge", 0.0), 0.0, 1.0)
 	var selected = data.get("active_member", 0)
 	active_member = int(selected) if (selected is int or selected is float) and int(selected) >= 0 and int(selected) < party.size() and party[int(selected)].joined and party[int(selected)].hp > 0 else 0
 	health = party[active_member].hp
@@ -348,8 +411,16 @@ func load_game() -> void:
 	for key in story_flags:
 		story_flags[key] = saved_flags.get(key, false) if saved_flags is Dictionary and saved_flags.get(key, false) is bool else false
 	var saved_hp = data.get("slime_hp", 3)
-	monster_hp = clampi(int(saved_hp), 0, 3) if saved_hp is float or saved_hp is int else 3
-	if story_flags.slime: monster_hp = 0
+	region_enemies = {"field":3, "forest":3, "mountain":3, "approach":3}
+	var saved_enemies = data.get("region_enemies", {})
+	if saved_enemies is Dictionary:
+		for key in region_enemies:
+			var n = saved_enemies.get(key, 3)
+			if n is float or n is int: region_enemies[key] = clampi(int(n), 0, 3)
+	else: saved_enemies = {}
+	if not saved_enemies.has("field") and (saved_hp is float or saved_hp is int): region_enemies.field = clampi(int(saved_hp), 0, 3)
+	if story_flags.slime: region_enemies.field = 0
+	monster_hp = region_enemies.get(map_id, 0)
 	monster = Vector2(650, 350)
 	fade = 0.8; message("불러왔습니다.")
 
@@ -439,6 +510,16 @@ func _draw() -> void:
 				draw_rect(Rect2(x, y, 94, 26), Color("756b60"), false, 1)
 		rect(Rect2(390, 290, 180, 135), "415e5e")
 		draw_rect(Rect2(398, 298, 164, 119), Color("9bafa2"), false, 2)
+	if map_id in ["forest", "mountain", "approach"]:
+		var terrain := {"forest":Color("375344"), "mountain":Color("666a68"), "approach":Color("49434f")}[map_id] as Color
+		for i in range(8):
+			var x := 70.0 + i * 120.0
+			if map_id == "forest":
+				draw_rect(Rect2(x, 100, 18, 70), Color("50483d")); draw_circle(Vector2(x + 9, 100), 35, terrain)
+			elif map_id == "mountain":
+				draw_colored_polygon(PackedVector2Array([Vector2(x - 30, 210), Vector2(x + 10, 105), Vector2(x + 55, 210)]), terrain)
+			else:
+				draw_rect(Rect2(x, 110, 85, 95), terrain); draw_rect(Rect2(x + 30, 135, 24, 55), Color("262e38"))
 	if map_id == "outside":
 		rect(Rect2(298, 100, 390, 160), "30423e"); rect(Rect2(285, 85, 390, 165), "344858"); rect(Rect2(300, 105, 360, 145), "c7b5a0")
 		rect(Rect2(285, 85, 390, 30), "7d6260"); rect(Rect2(445, 175, 70, 75), "4c5360")
@@ -463,10 +544,10 @@ func _draw() -> void:
 		rect(Rect2(440, 470, 80, 28), "927b67"); rect(Rect2(448, 474, 64, 3), "c4ad88")
 	if map_id == "outside":
 		label(Vector2(850, 320), "동쪽 길 →", 18)
-	elif map_id == "field":
-		label(Vector2(20, 310), "← 마을", 18)
+	elif is_combat_map():
+		label(Vector2(20, 310), "← 돌아가기", 18)
 		label(Vector2(845, 310), "숲 →", 18)
-	if map_id == "field" and monster_hp > 0:
+	if is_combat_map() and monster_hp > 0:
 		var m := monster.round()
 		draw_ellipse_shadow(m)
 		draw_circle(m + Vector2(0, -12), 19, Color("e8c49b") if monster_hurt > 0 else Color("374c53"))
@@ -483,9 +564,22 @@ func _draw() -> void:
 		elif elapsed < 0.15: attack_amount = lerpf(-0.18, 1.0, (elapsed - 0.08) / 0.07)
 		else: attack_amount = pow(punch_time / 0.17, 2.0)
 	var pose := player + punch_direction * attack_amount * 4
-	if party[1 - active_member].joined and party[1 - active_member].hp > 0:
-		if active_member == 1: draw_chanyu(follower, facing, walk if moving else 0.0, false)
-		else: person(follower, facing, walk if moving else 0.0, Color("aeb9c9"))
+	for i in range(party.size()):
+		if i == active_member or not party[i].joined or party[i].hp <= 0: continue
+		var follower_pos := follower + Vector2(-20 * i, 13 * i)
+		if i == 0: draw_chanyu(follower_pos, facing, walk if moving else 0.0, false)
+		else: person(follower_pos, facing, walk if moving else 0.0, Color("aeb9c9"))
+	if special_time > 0 and special_kind == 0:
+		var blade_side := Vector2(-special_direction.y, special_direction.x)
+		var end := special_origin + special_direction * 60 + blade_side * (special_time - 0.15) * 160
+		draw_line(special_origin + Vector2(0, -18), end + Vector2(0, -18), Color("e1efdc"), 5)
+	elif special_time > 0 and special_kind == 3:
+		draw_line(special_origin + Vector2(0, -18), special_origin + special_direction * 260 + Vector2(0, -18), Color("c6e5f2"), 9)
+	if projectile_alive:
+		draw_circle(projectile_pos + Vector2(0, -18), 9, Color("b0ded5") if special_kind == 1 else Color("c9d989"))
+	if map_id in ["forest", "mountain", "approach"]:
+		var idx := {"forest":1, "mountain":2, "approach":3}[map_id] as int
+		if not party[idx].joined: person(Vector2(400, 330), Vector2.DOWN, 0.0, Color("c7b6a3"))
 	if dash_time > 0:
 		draw_circle(player - dash_dir * 20 + Vector2(0, -20), 11, Color(0.75, 0.9, 0.85, 0.25))
 	if active_member == 0: draw_chanyu(pose, facing, walk if moving and punch_time <= 0 else 0.0, hurt_time > 0)
@@ -521,12 +615,14 @@ func _draw() -> void:
 		draw_line(stick_center() + tick * 67, stick_center() + tick * 73, Color("a3b7ac"), 2)
 	draw_arc(stick_center(), 78, 0, TAU, 48, Color(0.75, 0.85, 0.82, 0.5), 2)
 	draw_circle(stick_center() + stick_vector, 32, Color(0.68, 0.79, 0.76, 0.85 if stick_vector != Vector2.ZERO else 0.6))
-	for i in range(2):
+	for i in range(party.size()):
 		if not party[i].joined: continue
 		var r: Rect2 = c["party%d" % (i + 1)]
 		panel(r, Color("34544f") if active_member == i else Color("182b30"), Color("a2c3a9") if active_member == i else Color("54736b"))
-		label(r.position + Vector2(8, 23), "찬유" if i == 0 else "임시", 16)
+		label(r.position + Vector2(8, 23), ["찬유", "정우", "예찬", "서진"][i], 16)
 		label(r.position + Vector2(8, 48), "%d / %d" % [party[i].hp, party[i].max_hp], 14)
+	draw_circle(c.special.get_center(), 36, Color("496e76") if special_cooldown <= 0 else Color("39484d"))
+	label(c.special.get_center() + Vector2(-19, 6), "특수", 18)
 	draw_circle(c.dash.get_center(), 34, Color("536d79") if dash_cooldown <= 0 else Color("39484d"))
 	label(c.dash.get_center() + Vector2(-19, 6), "대시", 18)
 	draw_circle(c.attack.get_center(), 38, Color("aa715f") if punch_time > 0 else Color("754d45"))
@@ -541,7 +637,7 @@ func _draw() -> void:
 		label(c[key].position + Vector2(10, 30), "저장" if key == "save" else ("불러오기" if key == "load" else "도움말"), 16)
 	for i in range(5):
 		draw_circle(Vector2(28 + i * 18, 55), 6, Color("e7a99d") if i < health else Color("566465"))
-	label(Vector2(20, 30), "시작 마을" if map_id == "outside" else ("마을 실내" if map_id == "inside" else "마을 밖 들판"), 18)
+	label(Vector2(20, 30), {"outside":"시작 마을", "inside":"마을 실내", "field":"마을 밖 들판", "forest":"숲길", "mountain":"산길", "approach":"마왕성 앞"}.get(map_id, ""), 18)
 	if dialogue == "" and not help_open:
 		label(Vector2(250, 35), "목표: " + objective(), 16, Color("e6ead9"))
 	if dialogue != "":
@@ -561,7 +657,7 @@ func _draw() -> void:
 		label(Vector2(210, 165), "조작 안내", 24)
 		label(Vector2(210, 210), "왼쪽 조이스틱을 움직여 이동하세요.", 19)
 		label(Vector2(210, 245), "대상을 바라본 채 가까이에서 확인을 누르세요.", 19)
-		label(Vector2(210, 280), "WASD 이동 · J 공격 · Shift 대시 · E 확인", 18)
+		label(Vector2(210, 280), "WASD 이동 · J 공격 · K 특수 · E 확인", 18)
 		label(Vector2(210, 335), "1~4 교체 · 화면을 눌러 닫기", 18, Color("b8d0c8"))
 
 	if game_over:
