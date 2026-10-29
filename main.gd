@@ -27,6 +27,15 @@ var fade := 0.0
 var monster := Vector2(800, 410)
 var monster_hp := 3
 var health := 5
+# The second member is a prototype fixture, not a story recruitment decision.
+var party := [{"id":"chanyu", "hp":5, "max_hp":5, "gauge":0.0, "joined":true}, {"id":"test", "hp":5, "max_hp":5, "gauge":0.0, "joined":true}]
+var active_member := 0
+var follower := Vector2(440, 350)
+var game_over := false
+var dash_time := 0.0
+var dash_cooldown := 0.0
+var dash_dir := Vector2.ZERO
+var move_input := Vector2.ZERO
 var punch_time := 0.0
 var punch_direction := Vector2.DOWN
 var punch_hit := false
@@ -40,7 +49,7 @@ var shake_time := 0.0
 var shake_strength := 0.0
 
 func controls() -> Dictionary:
-	return {"attack": Rect2(755, 315, 80, 80), "action": Rect2(820, 405, 110, 110), "save": Rect2(750, 12, 90, 48), "load": Rect2(850, 12, 98, 48), "help": Rect2(870, 70, 75, 45), "yes": Rect2(335, 385, 135, 48), "no": Rect2(490, 385, 135, 48)}
+	return {"dash": Rect2(665, 400, 72, 72), "party1": Rect2(15, 100, 72, 60), "party2": Rect2(95, 100, 72, 60), "attack": Rect2(755, 315, 80, 80), "action": Rect2(820, 405, 110, 110), "save": Rect2(750, 12, 90, 48), "load": Rect2(850, 12, 98, 48), "help": Rect2(870, 70, 75, 45), "yes": Rect2(335, 385, 135, 48), "no": Rect2(490, 385, 135, 48)}
 
 func stick_center() -> Vector2: return Vector2(115, 425)
 func update_stick(pos: Vector2) -> void:
@@ -58,6 +67,11 @@ func tap(pos: Vector2) -> void:
 	if help_open:
 		help_open = false
 		return
+	if game_over:
+		restart_game(); return
+	if c.party1.has_point(pos): switch_member(0); return
+	if c.party2.has_point(pos): switch_member(1); return
+	if c.dash.has_point(pos): start_dash(); return
 	if c.attack.has_point(pos): punch(); return
 	if c.help.has_point(pos): help_open = true; return
 	if c.save.has_point(pos): save_game(); return
@@ -87,12 +101,17 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and stick_mouse: update_stick(event.position)
 	elif event is InputEventKey and event.pressed and not event.echo:
 		if help_open: help_open = false; return
+		if game_over:
+			restart_game(); return
 		if event.keycode == KEY_E or event.keycode == KEY_ENTER or event.keycode == KEY_SPACE:
 			if choices: choose(true)
 			elif dialogue != "": dialogue = ""
 			else: interact()
+		elif choices and event.keycode == KEY_1: choose(true)
 		elif choices and event.keycode == KEY_2: choose(false)
-		elif event.keycode == KEY_F: punch()
+		elif dialogue == "" and event.keycode >= KEY_1 and event.keycode <= KEY_4: switch_member(event.keycode - KEY_1)
+		elif event.keycode == KEY_J or event.keycode == KEY_F: punch()
+		elif event.keycode == KEY_SHIFT: start_dash()
 
 func _process(delta: float) -> void:
 	fade = maxf(0.0, fade - delta * 2.5)
@@ -107,7 +126,7 @@ func _process(delta: float) -> void:
 	hurt_time = maxf(0.0, hurt_time - delta)
 	monster_hurt = maxf(0.0, monster_hurt - delta)
 	shake_time = maxf(0.0, shake_time - delta)
-	if map_id == "outside" and monster_hp > 0 and dialogue == "" and not help_open:
+	if map_id == "outside" and monster_hp > 0 and dialogue == "" and not help_open and not game_over:
 		enemy_cooldown = maxf(0.0, enemy_cooldown - delta)
 		var away := player - monster
 		if away.length() < 230 and away.length() > 32:
@@ -116,26 +135,55 @@ func _process(delta: float) -> void:
 		if away.length() < 38 and enemy_cooldown <= 0:
 			health -= 1; enemy_cooldown = 1.6; hurt_time = 0.45
 			haptic(35); shake_time = 0.16; shake_strength = 3.0
+			party[active_member].hp = health
 			if health <= 0:
-				health = 5; player = Vector2(470, 330); monster = Vector2(800, 410); monster_hp = 3
-				message("체력을 회복하고 돌아왔습니다.")
+				var replacement := -1
+				for i in range(party.size()):
+					if party[i].joined and party[i].hp > 0: replacement = i; break
+				if replacement < 0: game_over = true; message("모두 쓰러졌습니다.")
+				else: switch_member(replacement); message("동료가 전투를 이어갑니다.")
 	var d := Vector2(int(Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D)) - int(Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A)), int(Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S)) - int(Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W)))
 	if d == Vector2.ZERO and stick_vector.length() >= 12: d = stick_vector.normalized()
 	elif d != Vector2.ZERO: d = d.normalized()
+	move_input = d
+	dash_cooldown = maxf(0.0, dash_cooldown - delta)
+	var is_dashing := dash_time > 0.0
+	dash_time = maxf(0.0, dash_time - delta)
+	if is_dashing: d = dash_dir
 	moving = false
-	if dialogue == "" and not help_open and d != Vector2.ZERO:
+	if dialogue == "" and not help_open and not game_over and d != Vector2.ZERO:
 		if punch_time <= 0: facing = d.normalized()
-		var step := d * SPEED * minf(delta, 0.05) * (0.55 if punch_time > 0 else 1.0)
+		var step := d * (375.0 if is_dashing else SPEED * (0.55 if punch_time > 0 else 1.0)) * minf(delta, 0.05)
 		var before := player
 		if can_move(player + Vector2(step.x, 0)): player.x += step.x
 		if can_move(player + Vector2(0, step.y)): player.y += step.y
 		moving = player.distance_squared_to(before) > 0.001
+	if follower.distance_to(player) > 45:
+		var fstep := follower.direction_to(player) * minf(follower.distance_to(player) - 45, delta * 125.0)
+		if can_move(follower + fstep): follower += fstep
 	if moving: walk += delta * 9.0
 	else: walk = 0.0
 	var half := Vector2(960, 540) / (2.0 * ZOOM)
 	var desired := player.clamp(half, Vector2(960, 540) - half)
 	camera = camera.lerp(desired, 1.0 - exp(-delta * 7.0))
 	queue_redraw()
+
+func switch_member(index: int) -> void:
+	if index < 0 or index >= party.size() or not party[index].joined or party[index].hp <= 0 or dialogue != "" or help_open or game_over: return
+	party[active_member].hp = health
+	active_member = index; health = party[index].hp
+	punch_time = 0.0; dash_time = 0.0
+
+func start_dash() -> void:
+	if dash_cooldown > 0 or dialogue != "" or help_open or game_over: return
+	dash_dir = move_input.normalized() if move_input.length() > 0.1 else facing
+	dash_time = 0.16; dash_cooldown = 0.8; punch_time = 0.0
+
+func restart_game() -> void:
+	for member in party: member.hp = member.max_hp
+	game_over = false; active_member = 0; health = party[0].hp
+	player = Vector2(470, 330); follower = Vector2(440, 350)
+	map_id = "outside"; monster = Vector2(800, 410); monster_hp = 3; enemy_cooldown = 1.0
 
 func haptic(duration_ms: int) -> void:
 	if OS.has_feature("web"):
@@ -144,7 +192,7 @@ func haptic(duration_ms: int) -> void:
 		Input.vibrate_handheld(duration_ms)
 
 func punch() -> void:
-	if dialogue != "" or help_open or punch_cooldown > 0: return
+	if dialogue != "" or help_open or punch_cooldown > 0 or dash_time > 0 or game_over: return
 	punch_time = 0.32; punch_cooldown = 0.42; punch_direction = facing; punch_hit = false
 
 func resolve_punch() -> void:
@@ -188,6 +236,7 @@ func interact() -> void:
 		"door":
 			if map_id == "outside": map_id = "inside"; player = Vector2(480, 410); facing = Vector2.UP
 			else: map_id = "outside"; player = Vector2(480, 290); facing = Vector2.DOWN
+			follower = player + Vector2(-30, 20)
 			fade = 0.8
 		"object":
 			inspected = true; dialogue = "테스트 물건을 살펴보았습니다."
@@ -206,7 +255,8 @@ func save_game() -> void:
 		message("대화를 마친 뒤 저장할 수 있습니다."); return
 	var file := FileAccess.open("user://prototype_save.json", FileAccess.WRITE)
 	if file == null: message("저장하지 못했습니다."); return
-	file.store_string(JSON.stringify({"version": 1, "map": map_id, "x": player.x, "y": player.y, "met": met, "inspected": inspected, "facing_x": facing.x, "facing_y": facing.y}))
+	party[active_member].hp = health
+	file.store_string(JSON.stringify({"party": party, "active_member": active_member, "version": 1, "map": map_id, "x": player.x, "y": player.y, "met": met, "inspected": inspected, "facing_x": facing.x, "facing_y": facing.y}))
 	file.close()
 	message("저장했습니다.")
 
@@ -231,6 +281,19 @@ func load_game() -> void:
 	if (fx is float or fx is int) and (fy is float or fy is int):
 		var loaded_facing := Vector2(fx, fy)
 		if loaded_facing.is_finite() and loaded_facing.length() > 0.1: facing = loaded_facing.normalized()
+	# Older saves lack party state; restore the prototype defaults.
+	for member in party:
+		member.hp = member.max_hp; member.gauge = 0.0; member.joined = true
+	var saved_party = data.get("party", [])
+	if saved_party is Array and saved_party.size() == 2:
+		for i in range(2):
+			var member = saved_party[i]
+			if member is Dictionary and (member.get("hp") is int or member.get("hp") is float) and member.get("joined") is bool and member.get("gauge", 0.0) is float:
+				party[i].hp = clampi(int(member.hp), 0, party[i].max_hp); party[i].joined = member.joined; party[i].gauge = clampf(member.get("gauge", 0.0), 0.0, 1.0)
+	var selected = data.get("active_member", 0)
+	active_member = int(selected) if (selected is int or selected is float) and int(selected) >= 0 and int(selected) < party.size() and party[int(selected)].joined and party[int(selected)].hp > 0 else 0
+	health = party[active_member].hp
+	game_over = health <= 0; follower = player + Vector2(-30, 20)
 	fade = 0.8; message("불러왔습니다.")
 
 func panel(area: Rect2, fill: Color, border: Color) -> void:
@@ -347,7 +410,11 @@ func _draw() -> void:
 		elif elapsed < 0.15: attack_amount = lerpf(-0.18, 1.0, (elapsed - 0.08) / 0.07)
 		else: attack_amount = pow(punch_time / 0.17, 2.0)
 	var pose := player + punch_direction * attack_amount * 4
-	person(pose, facing, walk if moving and punch_time <= 0 else 0.0, Color("e6a99c") if hurt_time > 0 else Color("dce5e4"))
+	if party[1 - active_member].joined and party[1 - active_member].hp > 0:
+		person(follower, facing, walk if moving else 0.0, Color("aeb9c9"))
+	if dash_time > 0:
+		draw_circle(player - dash_dir * 20 + Vector2(0, -20), 11, Color(0.75, 0.9, 0.85, 0.25))
+	person(pose, facing, walk if moving and punch_time <= 0 else 0.0, Color("e6a99c") if hurt_time > 0 else (Color("dce5e4") if active_member == 0 else Color("aeb9c9")))
 	if punch_time > 0:
 		var side_arm := Vector2(-punch_direction.y, punch_direction.x)
 		var shoulder := pose + Vector2(0, -22) + side_arm * 7
@@ -379,6 +446,13 @@ func _draw() -> void:
 		draw_line(stick_center() + tick * 67, stick_center() + tick * 73, Color("a3b7ac"), 2)
 	draw_arc(stick_center(), 78, 0, TAU, 48, Color(0.75, 0.85, 0.82, 0.5), 2)
 	draw_circle(stick_center() + stick_vector, 32, Color(0.68, 0.79, 0.76, 0.85 if stick_vector != Vector2.ZERO else 0.6))
+	for i in range(2):
+		var r: Rect2 = c["party%d" % (i + 1)]
+		panel(r, Color("34544f") if active_member == i else Color("182b30"), Color("a2c3a9") if active_member == i else Color("54736b"))
+		label(r.position + Vector2(8, 23), "찬유" if i == 0 else "임시", 16)
+		label(r.position + Vector2(8, 48), "%d / %d" % [party[i].hp, party[i].max_hp], 14)
+	draw_circle(c.dash.get_center(), 34, Color("536d79") if dash_cooldown <= 0 else Color("39484d"))
+	label(c.dash.get_center() + Vector2(-19, 6), "대시", 18)
 	draw_circle(c.attack.get_center(), 38, Color("aa715f") if punch_time > 0 else Color("754d45"))
 	draw_arc(c.attack.get_center(), 36, 0, TAU, 40, Color("e2c0a0"), 2)
 	label(c.attack.get_center() + Vector2(-19, 6), "공격", 19)
@@ -411,5 +485,10 @@ func _draw() -> void:
 		label(Vector2(210, 165), "조작 안내", 24)
 		label(Vector2(210, 210), "왼쪽 조이스틱을 움직여 이동하세요.", 19)
 		label(Vector2(210, 245), "대상을 바라본 채 가까이에서 확인을 누르세요.", 19)
-		label(Vector2(210, 280), "방향키 / WASD 이동 · E 확인 · F 공격", 18)
-		label(Vector2(210, 335), "공격 버튼으로 주먹을 날립니다. 눌러서 닫기", 18, Color("b8d0c8"))
+		label(Vector2(210, 280), "WASD 이동 · J 공격 · Shift 대시 · E 확인", 18)
+		label(Vector2(210, 335), "1~4 교체 · 화면을 눌러 닫기", 18, Color("b8d0c8"))
+
+	if game_over:
+		panel(Rect2(250, 190, 460, 150), Color("15272d"), Color("93afa0"))
+		label(Vector2(365, 245), "모두 쓰러졌습니다", 24)
+		label(Vector2(325, 295), "화면을 눌러 다시 시작", 18)
