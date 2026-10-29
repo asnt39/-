@@ -378,9 +378,9 @@ func draw_chanyu(pos: Vector2, dir: Vector2, phase: float, hurt: bool) -> void:
 	elif dir.y < 0: row = 3
 	var column := 0
 	if phase != 0.0: column = 1 if sin(phase) >= 0 else 2
-	var source := Rect2(column * 181, row * 181, 181, 181)
+	var source := Rect2(column * 181, row * 181 + 10, 181, 171)
 	var tint := Color(1.0, 0.65, 0.65) if hurt else Color.WHITE
-	draw_texture_rect_region(chanyu, Rect2(pos + Vector2(-31, -59), Vector2(62, 62)), source, tint)
+	draw_texture_rect_region(chanyu, Rect2(pos + Vector2(-31, -59), Vector2(62, 58.5)), source, tint)
 
 func person(pos: Vector2, dir: Vector2, phase: float, color: Color) -> void:
 	draw_ellipse_shadow(pos)
@@ -532,7 +532,7 @@ func _draw() -> void:
 	draw_circle(c.attack.get_center(), 38, Color("aa715f") if punch_time > 0 else Color("754d45"))
 	draw_arc(c.attack.get_center(), 36, 0, TAU, 40, Color("e2c0a0"), 2)
 	label(c.attack.get_center() + Vector2(-19, 6), "공격", 19)
-	if not OS.has_feature("mobile"): label(c.attack.get_center() + Vector2(-4, 24), "F", 11, Color("dac3b3"))
+	if not OS.has_feature("mobile"): label(c.attack.get_center() + Vector2(-4, 24), "J", 11, Color("dac3b3"))
 	draw_circle(c.action.get_center(), 51, Color(0.32, 0.55, 0.53, 0.98) if action_feedback > 0 else Color(0.16, 0.35, 0.36, 0.94))
 	draw_arc(c.action.get_center(), 48, 0, TAU, 48, Color(0.75, 0.87, 0.82, 0.8), 2)
 	label(c.action.get_center() + Vector2(-19, 7), "확인", 19)
