@@ -22,7 +22,7 @@ var action_feedback := 0.0
 var notice := ""
 var help_open := true
 var camera := Vector2(480, 270)
-const ZOOM := 1.25
+const ZOOM := 1.65
 var fade := 0.0
 
 func controls() -> Dictionary:
@@ -111,16 +111,18 @@ func can_move(pos: Vector2) -> bool:
 	return true
 
 func target() -> String:
-	var objects := [{"id":"door", "pos":Vector2(480, 257)}, {"id":"object", "pos":Vector2(695, 328)}, {"id":"npc", "pos":Vector2(245, 330)}] if map_id == "outside" else [{"id":"door", "pos":Vector2(480, 470)}, {"id":"object", "pos":Vector2(665, 295)}]
+	var objects := [{"id":"door", "pos":Vector2(480, 250), "radius": 22.0}, {"id":"object", "pos":Vector2(695, 328), "radius": 27.0}, {"id":"npc", "pos":Vector2(245, 330), "radius": 14.0}] if map_id == "outside" else [{"id":"door", "pos":Vector2(480, 470), "radius": 22.0}, {"id":"object", "pos":Vector2(665, 295), "radius": 24.0}]
 	var best := ""
 	var best_score := -999.0
 	for item in objects:
 		var offset: Vector2 = item.pos - player
 		var distance := offset.length()
-		if distance < 1.0 or distance > 85.0: continue
-		var alignment := facing.dot(offset / distance)
-		if alignment < 0.65: continue
-		var score := alignment * 100.0 - distance * 0.6
+		var reach: float = maxf(0.0, distance - item.radius)
+		if reach > 62.0: continue
+		var alignment := facing.dot(offset.normalized()) if distance > 0.1 else 1.0
+		# At point-blank range, allow a small amount of sideways overlap.
+		if alignment < (0.0 if reach < 12.0 else 0.45): continue
+		var score := alignment * 50.0 - reach
 		if score > best_score: best_score = score; best = item.id
 	return best
 
@@ -186,6 +188,8 @@ func person(pos: Vector2, dir: Vector2, phase: float, color: Color) -> void:
 	draw_rect(Rect2(p + Vector2(9, 3), Vector2(12, 12)), color)
 	draw_rect(Rect2(p + Vector2(6, 18), Vector2(18, 17)), outline)
 	draw_rect(Rect2(p + Vector2(9, 18), Vector2(12, 14)), color.darkened(0.1))
+	draw_rect(Rect2(p + Vector2(9, 18), Vector2(12, 3)), color.lightened(0.12))
+	draw_rect(Rect2(p + Vector2(12, 24), Vector2(6, 3)), color.darkened(0.22))
 	if dir.y < -0.5: draw_rect(Rect2(p + Vector2(9, 3), Vector2(12, 7)), color.darkened(0.2))
 	elif absf(dir.x) > absf(dir.y): draw_rect(Rect2(p + Vector2(9 if dir.x < 0 else 18, 6), Vector2(3, 3)), outline)
 	else:
@@ -206,12 +210,17 @@ func _draw() -> void:
 		rect(Rect2(285, 85, 390, 165), "344858"); rect(Rect2(300, 105, 360, 145), "c7b5a0")
 		rect(Rect2(285, 85, 390, 30), "7d6260"); rect(Rect2(445, 175, 70, 75), "4c5360")
 		rect(Rect2(455, 185, 50, 65), "8c7263"); rect(Rect2(320, 135, 65, 45), "96bbc1"); rect(Rect2(575, 135, 65, 45), "96bbc1")
-		rect(Rect2(665, 305, 60, 45), "8a725b"); rect(Rect2(670, 310, 50, 12), "c2a581")
+		rect(Rect2(458, 190, 44, 3), "ad9981"); rect(Rect2(491, 217, 4, 5), "e1cc99")
+		for x in [350, 605]:
+			rect(Rect2(x, 135, 4, 45), "d9d2bd"); rect(Rect2(x - 30, 155, 65, 3), "d9d2bd")
+		rect(Rect2(285, 112, 390, 5), "645758")
+		for x in range(310, 650, 40): rect(Rect2(x, 87, 18, 3), "ad8e83")
+		rect(Rect2(665, 305, 60, 45), "8a725b"); rect(Rect2(670, 310, 50, 12), "c2a581"); rect(Rect2(680, 325, 30, 3), "d8c6a1"); rect(Rect2(690, 336, 8, 4), "d8c6a1")
 		person(Vector2(245, 330), Vector2.DOWN, 0.0, Color("c9bdad"))
 	else:
 		rect(Rect2(355, 145, 250, 65), "8a705b"); rect(Rect2(365, 150, 230, 35), "b7a084")
 		rect(Rect2(640, 270, 50, 45), "94775b"); rect(Rect2(645, 275, 40, 10), "c7ac84")
-		rect(Rect2(440, 470, 80, 28), "927b67")
+		rect(Rect2(440, 470, 80, 28), "927b67"); rect(Rect2(448, 474, 64, 3), "c4ad88")
 	person(player, facing, walk if moving else 0.0, Color("dce5e4"))
 	var arrow_center := player + facing * 27.0 + Vector2(0, -17)
 	var side := Vector2(-facing.y, facing.x)
@@ -226,7 +235,8 @@ func _draw() -> void:
 	draw_arc(c.action.get_center(), 48, 0, TAU, 48, Color(0.75, 0.87, 0.82, 0.8), 2)
 	label(c.action.get_center() + Vector2(-19, 7), "확인", 19)
 	for key in ["save", "load", "help"]:
-		draw_rect(c[key], Color(0.08, 0.13, 0.17, 0.88))
+		draw_rect(c[key], Color(0.08, 0.13, 0.17, 0.90))
+		draw_rect(Rect2(c[key].position, Vector2(c[key].size.x, 2)), Color("83aaa4"))
 		label(c[key].position + Vector2(10, 30), "저장" if key == "save" else ("불러오기" if key == "load" else "도움말"), 16)
 	label(Vector2(20, 30), "테스트 맵 · " + ("바깥" if map_id == "outside" else "실내"), 18)
 	if dialogue == "" and not help_open:
@@ -234,6 +244,7 @@ func _draw() -> void:
 	if dialogue != "":
 		draw_rect(Rect2(230, 290, 500, 155), Color(0.07, 0.11, 0.15, 0.96))
 		draw_rect(Rect2(230, 290, 500, 3), Color("90b2a9"))
+		draw_rect(Rect2(236, 297, 2, 141), Color(0.5, 0.68, 0.63, 0.5))
 		label(Vector2(250, 335), dialogue, 19)
 		if choices:
 			for key in ["yes", "no"]: draw_rect(c[key], Color("426c68"))
